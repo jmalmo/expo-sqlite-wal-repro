@@ -1,3 +1,4 @@
+import { registerRootComponent } from "expo";
 import { StatusBar } from "expo-status-bar";
 import { StyleSheet, Text, View, Button, ScrollView } from "react-native";
 import * as SQLite from "expo-sqlite";
@@ -14,6 +15,11 @@ export default function App() {
     const dbName = "wal-test.db";
     const dbPath = `${FileSystem.documentDirectory}SQLite/${dbName}`;
 
+    // Clean up from previous runs
+    try { await SQLite.deleteDatabaseAsync(dbName); } catch {}
+    try { await FileSystem.deleteAsync(dbPath + "-wal", { idempotent: true }); } catch {}
+    try { await FileSystem.deleteAsync(dbPath + "-shm", { idempotent: true }); } catch {}
+
     addLog("1. Opening database...");
     let db = await SQLite.openDatabaseAsync(dbName);
 
@@ -29,7 +35,14 @@ export default function App() {
     addLog("4. Closing database...");
     await db.closeAsync();
 
-    addLog("5. Checking files BEFORE delete:");
+    addLog("5. Simulating crash leftovers...");
+    addLog("   (writing fake -wal and -shm files)");
+    // After a crash or abnormal exit, WAL/SHM files remain on disk.
+    // We simulate this by creating them after a clean close.
+    await FileSystem.writeAsStringAsync(dbPath + "-wal", "stale WAL data from crash");
+    await FileSystem.writeAsStringAsync(dbPath + "-shm", "stale SHM data from crash");
+
+    addLog("6. Checking files BEFORE delete:");
     const mainExists = await FileSystem.getInfoAsync(dbPath);
     const walExists = await FileSystem.getInfoAsync(dbPath + "-wal");
     const shmExists = await FileSystem.getInfoAsync(dbPath + "-shm");
@@ -37,25 +50,28 @@ export default function App() {
     addLog(`   -wal:    ${walExists.exists ? "EXISTS" : "missing"}`);
     addLog(`   -shm:    ${shmExists.exists ? "EXISTS" : "missing"}`);
 
-    addLog("6. Deleting database via deleteDatabaseAsync...");
+    addLog("7. Deleting database via deleteDatabaseAsync...");
     await SQLite.deleteDatabaseAsync(dbName);
 
-    addLog("7. Checking files AFTER delete:");
+    addLog("8. Checking files AFTER delete:");
     const mainAfter = await FileSystem.getInfoAsync(dbPath);
     const walAfter = await FileSystem.getInfoAsync(dbPath + "-wal");
     const shmAfter = await FileSystem.getInfoAsync(dbPath + "-shm");
-    addLog(`   main db: ${mainAfter.exists ? "EXISTS (ok)" : "missing (ok)"}`);
+    addLog(`   main db: ${mainAfter.exists ? "EXISTS" : "missing (ok)"}`);
     addLog(
-      `   -wal:    ${walAfter.exists ? "EXISTS ← BUG! Not cleaned up" : "missing (ok)"}`
+      `   -wal:    ${walAfter.exists ? "EXISTS \u2190 BUG! Not cleaned up" : "missing (ok)"}`
     );
     addLog(
-      `   -shm:    ${shmAfter.exists ? "EXISTS ← BUG! Not cleaned up" : "missing (ok)"}`
+      `   -shm:    ${shmAfter.exists ? "EXISTS \u2190 BUG! Not cleaned up" : "missing (ok)"}`
     );
 
     if (walAfter.exists || shmAfter.exists) {
-      addLog("\n❌ BUG REPRODUCED: WAL/SHM files were NOT deleted");
+      addLog("\n\u274C BUG REPRODUCED: WAL/SHM files were NOT deleted");
+      addLog("   deleteDatabaseAsync only removes the main db file.");
+      addLog("   Stale WAL can be replayed against a new db with");
+      addLog("   the same name, causing corruption.");
     } else {
-      addLog("\n✅ All files cleaned up correctly");
+      addLog("\n\u2705 All files cleaned up correctly");
     }
   };
 
@@ -81,3 +97,5 @@ const styles = StyleSheet.create({
   logContainer: { marginTop: 20, flex: 1 },
   logText: { fontFamily: "monospace", fontSize: 13, marginBottom: 4 },
 });
+
+registerRootComponent(App);
