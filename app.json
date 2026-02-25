@@ -11,6 +11,9 @@
     "plugins": [
       "expo-sqlite",
       "expo-asset"
-    ]
+    ],
+    "ios": {
+      "bundleIdentifier": "com.lillelord.expo-sqlite-wal-repro"
+    }
   }
 }
